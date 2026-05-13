@@ -30,15 +30,7 @@
           propagatedBuildInputs = with pkgs.rPackages; [
             igraph
           ];
-          # propagatedBuildInputs = with pkgs.rPackages; [bslib evaluate jsonlite knitr stringr tinytex yaml xfun];
         };
-        # myvscode = pkgs.vscode-with-extensions.override {
-        #   vscodeExtensions = (with pkgs.vscode-extensions; [
-        #     enkia.tokyo-night
-        #     sainnhe.gruvbox-material
-        #     vscodevim.vim
-        #     reditorsupport.r
-        #   ]);};
       in
       {
         devShells.default = pkgs.mkShell {

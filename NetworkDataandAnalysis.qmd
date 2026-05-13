@@ -1,0 +1,97 @@
+---
+title: "Network Data and Analysis"
+format: gfm
+---
+
+```{r}
+options(paged.print = FALSE)
+```
+
+```{r}
+#| message: false
+library(igraph)
+```
+
+# Nature of networks
+
+Connections may be based on 
+- _similarities_, such as shared location, participation in the same event or organization, or common attributes
+- _relational roles_, such as kinship ties or other socially defined roles
+- _relational cognition_, including affective or perceptual relations (e.g., liking, trust, perceived influence).
+
+- Relations may be _symmetric_, as in mutual friendship, or _asymmetric_, as in advice-seeking or authority relations (though asymmetric ties can still be reciprocated and thus become bi-directional). 
+- Ties may vary in _strength_, _frequency_ of contact, or _intensity_
+- They can be _positive_ (e.g., friendship, cooperation) or _negative_ (e.g., conflict, dislike).
+
+_The usual statistical assumption of independence does not hold in networked settings._
+
+# Levels of Analysis
+
+- dyadic level, focusing on pairs of actors. The fundamental unit, as edges are always defined between two nodes. Focuses on how relationships form, and the consequences. For example, one might ask whether sharing an office increases the likelihood of friendship, or whether similarity in attributes leads to tie formation.
+
+- node level, considers the position of individual actors within the network, such as number of connections an individual has, centrality. Relates network properties to individual outcomes.  For instance, researchers may examine whether individuals with more social ties enjoy better health, higher performance, or greater access to resources.
+
+- network level, considers the overall structure of the network, such as density, clustering, centralization, or presence of subgroups. For example, one might ask whether more densely connected networks facilitate faster diffusion of information or innovation.
+
+# Network representations
+
+## Adjacency matrix
+
+$n \times n$ matrix, where $A_{ij} = 1$ if there is an edge between $i$ and $j$, and $A_{ij} = 0$ if not. For weighted graphs, arbitrary numbers are used.
+
+For undirected graphs, the matrices are symmetrical, for directed graphs, the may not be.
+
+While simple and efficient for edge lookups, adjacency matrices are space inefficient for sparse graphs, and scales poorly.
+
+## Edge list
+
+Each row contains a pair of nodes and represents an edge between the two nodes. For directed graphs, $(i,j)$ is an edge from $i$ to $j$, and is different from $(j,i)$.
+
+Space efficient for sparse graphs, inefficient for dense graphs, edge lookups and graph operations such as locating adjacent vertices.
+
+## Adjacency list
+
+A list of lists, each corresponding to a vertex and containing the adjacent vertices for the vertex. For undirected graphs, if $i$ is in $j$'s list, then $j$ is in $i$'s list. For directed graphs, the lists contains vertices pointed to.
+
+Efficient for space, scales well, efficient graph traversal. Poor for edge lookups, can be slow to access edges, less efficient for dense graphs.
+
+# Networks in `igraph`
+
+
+_Adjacency matrix_
+
+```{r}
+A <- matrix(
+  c(0, 1, 1, 1, 0, 1, 1, 1, 0),
+  nrow = 3, ncol = 3, byrow = T
+)
+
+rownames(A) <- colnames(A) <- c("Bob", "Ann", "Steve")
+A
+```
+
+_Edge list_
+
+```{r}
+(el <- matrix(
+  c("Bob", "Ann", "Bob", "Steve", "Ann", "Steve"),
+  nrow = 3, ncol = 2, byrow = T
+))
+```
+
+```{r}
+g1 <- graph_from_adjacency_matrix(
+  A, mode = "undirected", diag = FALSE)
+
+g2 <- graph_from_edgelist(
+  el, directed = FALSE
+)
+g1; g2
+```
+
+"UN" indicates the graph is undirected and has a Name attribute. The third and forth characters would be W if there are edge weights, and B if bipartite, the numbers are the number of nodes and edges.
+
+
+
+
+
