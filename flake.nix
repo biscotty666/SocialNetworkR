@@ -48,6 +48,7 @@
               egor
               igraph
               g6R
+              GA
               ggforce
               ggraph
               graphlayouts
