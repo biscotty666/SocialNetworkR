@@ -1,0 +1,476 @@
+---
+title: "Centrality"
+format: gfm
+---
+
+[Source](https://schochastics.github.io/R4SNA/descriptive/centrality-basic.html)
+
+```{r}
+options(paged.print = FALSE)
+```
+
+```{r}
+#| message: false
+
+libraries <- list(
+  "igraph", "networkdata", "netrankr",
+  "ggraph", "patchwork", "dplyr"
+)
+invisible(lapply(libraries, library, character.only = TRUE))
+```
+
+
+# Centrality Indices
+
+- _Degree_ - measures _activity_, how many direct connections does a node have? Many ties indicated active, popular or well-connected nodes
+- _Closeness_ - measures _efficiency_, how quickly can a node reach all others? Nodes close to everyone can spread information with minimal steps
+- _Betweenness_ - measure _brokerage_, how often does a node sit on the shortest path between others? Nodes with high betweenness mediate the flow between other parts of the network
+- _Eigenvector centrality_ - measures _prestige_, is a node connected to other well-connected nodes? Nodes of low degree may be central if they are tied to important nodes...centrality by association.
+
+The indices aren't interchangeable. Brokers need not be popular, and presigeous nodes may not have high closeness to everyone.
+
+- If you are interested in activity or popularity, degree (or strength for weighted networks) is the natural choice.
+- If you care about efficiency of communication or independence, closeness captures how quickly a node can reach others.
+- If brokerage or control is your focus, betweenness identifies nodes that bridge different parts of the network.
+- If you are interested in influence through connections, eigenvector centrality or PageRank captures prestige by association.
+
+```{r}
+#| label: fig-dbces11-basic-plot
+#| fig-cap: "The dbces11 example network used to illustrate centrality indices."
+
+ggraph(dbces11, "stress") +
+  geom_edge_link0() +
+  geom_node_point(shape = 21, size = 10, fill = "grey66") +
+  geom_node_text(aes(label = name)) +
+  theme_void() +
+  coord_equal(clip = "off")
+```
+
+## Degree Centrality
+
+Nodes of high degree are active or popular socially. With the adjacency matrix $A = (a_{vu})$:
+
+$$
+C_D(v) = \sum_{u \neq v} a_{vu}.
+$$
+
+```{r}
+degree(dbces11)
+```
+
+For weighted networks, _strength_ sums the edge weights rather than counting edges. As an illustration we use the miserables network, which records co-occurrences of characters in Victor Hugo’s Les Misérables, with edge weights counting how often two characters appear in the same chapter.
+
+```{r}
+strength(miserables, 
+         weights = E(miserables)$weight) %>% 
+  sort(decreasing = T) %>% head()
+```
+
+## Closeness Centrality
+
+Based on shortest path distances between nodes. A central node can reach others quickly. For the shortest path $d(v,u)$ from $v$ to $u$,
+
+$$
+C_C(v) = \frac{1}{\sum_{u \neq v} d(v, u)},
+$$
+so shorter total distances receive higher scores.
+
+```{r}
+closeness(dbces11)
+```
+
+For disconnected networks, `closeness` returns `NaN` for isolates. `harmonic_centrality` treats unreachable pairs as zero.
+
+## Betweenness Centrality
+
+Counts how often a node lies on the shortest path between pairs of other nodes. A node with high betweenness is a bridge or broker, and removal would increase distances or disconnect parts of the network.
+
+Letting $\sigma_{st}$ be the number of shortest paths from $s$ to $t$ and $\sigma_{st} (v)$ the number of those passing through $v$,
+
+$$
+C_B(v) = \sum_{s \neq v \neq t} \frac{\sigma_{st}(v)}{\sigma_{st}}.
+$$
+
+```{r}
+betweenness(dbces11)
+```
+
+## Eigenvector Centrality
+
+Weighs each connection by the centrality of the neighbor. A node is central if it is connected to other central zones, with the recursive definition
+
+$$
+C_E(v) = \frac{1}{\lambda} \sum_{u \in N(v)} C_E(u),
+$$
+
+```{r}
+eigen_centrality(dbces11)$vector
+```
+
+## Subgraph Centrality
+
+Quantifies the participation of each node in all subgraphs of the network. Captures how embedded a node is in the local structure of the network.
+
+```{r}
+subgraph_centrality(dbces11)
+```
+
+## Comparison
+
+```{r}
+#| label: fig-dbces11-centrality
+#| fig-cap: "Most central node for different centrality indices in the dbces11 graph. DC = degree, BC = betweenness, CC = closeness, EC = eigenvector, SC = subgraph centrality."
+
+V(dbces11)$cent <- NA
+V(dbces11)$cent[which.max(degree(dbces11))] <- "DC"
+V(dbces11)$cent[which.max(betweenness(dbces11))] <- "BC"
+V(dbces11)$cent[which.max(closeness(dbces11))] <- "CC"
+V(dbces11)$cent[which.max(eigen_centrality(dbces11)$vector)] <- "EC"
+V(dbces11)$cent[which.max(subgraph_centrality(dbces11))] <- "SC"
+
+ggraph(dbces11, "stress") +
+  geom_edge_link0() +
+  geom_node_point(
+    shape = 21,
+    size = 10,
+    aes(fill = cent),
+    show.legend = FALSE
+  ) +
+  geom_node_text(aes(filter = !is.na(cent), label = cent)) +
+  theme_void() +
+  coord_equal(clip = "off")
+```
+
+## Correlation Between Indices
+
+On some networks, all indices will largely agree; on others, they will diverge considerably. We examine this using Zachary’s karate club network, a classic social network of 34 members of a university karate club observed over three years in the 1970s.
+
+```{r}
+cent_df <- data.frame(
+  degree = degree(karate),
+  closeness = closeness(karate),
+  betweenness = betweenness(karate),
+  eigen = eigen_centrality(karate)$vector
+)
+round(cor(cent_df), 2)
+```
+
+```{r}
+#| label: fig-centrality-pairs
+#| fig-cap: "Pairwise scatter plots of four centrality indices computed on the karate club network."
+#| fig-width: 8
+#| fig-height: 8
+
+pairs(
+  cent_df,
+  pch = 19,
+  col = "steelblue",
+  labels = c("Degree", "Closeness", "Betweenness", "Eigenvector")
+)
+```
+
+
+# Directed Networks
+
+To illustrate them, we use the ht_advice network, a classic study of advice-seeking relations in a small high-tech company. A directed edge from $i$ to $j$ indicates that employee $i$ sought advice from $j$.
+
+## PageRank
+
+Assigns each node a score that grows with the number and PageRank of its incoming neighbors. A high PageRank indicates an individual who receives endorsement or attention from other well-regarded individuals.
+
+```{r}
+round(page_rank(ht_advice)$vector, 3)
+```
+
+## Hubs and Authorities
+
+The HITS algorithm assigns a hub score and an authority score to each node. A good hub points to many good authorities, and a good authority is pointed to by many good hubs. Authorities are frequently consulted, and hubs frequently consult many others.
+
+```{r}
+hits <- hits_scores(ht_advice)
+round(hits$hub, 3)
+```
+
+```{r}
+round(hits$authority, 3)
+```
+
+## Example - Ranking Tennis Players
+
+Every edge produces a tie driected from the loser to the winner. PageRank includes counts as well as weighting each win by the standing of the defeated opponent.
+
+The networkdata package provides season-level networks for the men’s (atp) and women’s (wta) tours from 1968 to 2021, with each list element representing one season. Edges point from loser to winner, and the edge weight records how many times that match-up occurred on a given surface. To rank players across the entire history of each tour, we collapse all 54 seasonal networks into a single weighted directed network: the weight of an edge from player i to player j is the total number of matches i lost to j over the period 1968-2021.
+
+```{r}
+combine_seasons <- function(net_list) {
+  edges <- do.call(
+    rbind,
+    lapply(net_list, function(g) {
+      igraph::as_data_frame(g, what = "edges")[, c("from", "to", "weight")]
+    })
+  )
+  edges <- aggregate(weight ~ from + to, data = edges, FUN = sum)
+  graph_from_data_frame(edges, directed = TRUE)
+}
+atp_all <- combine_seasons(atp)
+wta_all <- combine_seasons(wta)
+atp_all; wta_all
+```
+
+Compute PageRank on each network and inspect the ten highest-scoring players.
+
+```{r}
+atp_pr <- page_rank(atp_all)$vector
+wta_pr <- page_rank(wta_all)$vector
+round(head(sort(atp_pr, decreasing = T), 10), 4)
+```
+
+```{r}
+round(head(sort(wta_pr, decreasing = T), 10), 4)
+```
+
+```{r}
+#| label: fig-atp-all-time
+#| fig-cap: "Subnetwork induced by the 50 highest-ranked ATP players by PageRank across all seasons (1968-2021). Node size is proportional to PageRank; the top twelve players are labelled."
+#| fig-width: 8
+#| fig-height: 8
+#| message: false
+#| warning: false
+
+top_atp <- names(sort(atp_pr, decreasing = TRUE))[1:50]
+atp_top <- subgraph(atp_all, top_atp)
+V(atp_top)$pr <- atp_pr[V(atp_top)$name]
+V(atp_top)$lab <- ifelse(rank(-V(atp_top)$pr) <= 12, V(atp_top)$name, "")
+
+ggraph(atp_top, "stress") +
+  geom_edge_link0(edge_alpha = 0.1, edge_color = "grey30") +
+  geom_node_point(
+    aes(size = pr),
+    shape = 21,
+    fill = "steelblue",
+    show.legend = FALSE
+  ) +
+  geom_node_text(aes(label = lab), repel = TRUE, size = 3) +
+  scale_size(range = c(2, 8)) +
+  theme_void() +
+  coord_equal(clip = "off")
+```
+
+```{r}
+#| label: fig-wta-all-time
+#| fig-cap: "Subnetwork induced by the 50 highest-ranked WTA players by PageRank across all seasons (1968-2021). Node size is proportional to PageRank; the top twelve players are labelled."
+#| fig-width: 8
+#| fig-height: 8
+#| message: false
+#| warning: false
+
+top_wta <- names(sort(wta_pr, decreasing = TRUE))[1:50]
+wta_top <- subgraph(wta_all, top_wta)
+V(wta_top)$pr <- wta_pr[V(wta_top)$name]
+V(wta_top)$lab <- ifelse(rank(-V(wta_top)$pr) <= 12, V(wta_top)$name, "")
+
+ggraph(wta_top, "stress") +
+  geom_edge_link0(edge_alpha = 0.1, edge_color = "grey30") +
+  geom_node_point(
+    aes(size = pr),
+    shape = 21,
+    fill = "tomato",
+    show.legend = FALSE
+  ) +
+  geom_node_text(aes(label = lab), repel = TRUE, size = 3) +
+  scale_size(range = c(2, 8)) +
+  theme_void() +
+  coord_equal(clip = "off")
+```
+
+# Normalization
+
+To make comparisons across networks of different sizes.
+
+```{r}
+degree(dbces11); degree(dbces11, normalized = T)
+```
+
+# Centralization
+
+Centrality is node-level, centralization is network-level. Comparison to a maximally centralized network (1) and an evenly distributed network (0).
+
+```{r}
+#| label: fig-centralization-contrast
+#| fig-cap: "A star graph (left) has maximum centralization while a ring graph (right) has minimum centralization."
+#| fig-width: 10
+#| fig-height: 5
+
+p1 <- ggraph(make_star(10, mode = "undirected"), "stress") +
+  geom_edge_link0(edge_color = "grey66") +
+  geom_node_point(shape = 21, size = 6, fill = "grey25") +
+  theme_void() +
+  ggtitle("Star graph")
+
+p2 <- ggraph(make_ring(10), "stress") +
+  geom_edge_link0(edge_color = "grey66") +
+  geom_node_point(shape = 21, size = 6, fill = "grey25") +
+  theme_void() +
+  ggtitle("Ring graph")
+
+p1 + p2
+```
+
+```{r}
+centr_degree(make_star(10, mode = "undirected"))$centralization
+```
+
+```{r}
+centr_degree(make_ring(10))$centralization
+```
+
+```{r}
+c(
+  degree = centr_degree(karate)$centralization,
+  betweenness = centr_betw(karate)$centralization,
+  closeness = centr_clo(karate)$centralization,
+  eigen = centr_eigen(karate)$centralization
+)
+```
+
+# Other Centrality Measures
+
+`sna` implements _flow betweenness_ based on maximum flow rather than shortes path, _information centrality_ based on information-theoretic measures, and _stress centrality_, counting all shortest paths through a node, without normalization. `sna` operates on adjacency matrices.
+
+```{r}
+A <- as_adjacency_matrix(dbces11, sparse = F)
+sna::flowbet(A, gmode = "graph")
+```
+
+```{r}
+round(sna::infocent(A, gmode = "graph"), 3)
+```
+
+# Example - Florentine Families
+
+Since Pucci is isolated, and closeness is not well defined for disconnected networks, look at the connected sub-graph only.
+
+```{r}
+flo_marriage_sub <- subgraph(
+  flo_marriage,
+  components(flo_marriage)$membership ==
+    which.max(components(flo_marriage)$csize)
+)
+```
+
+```{r}
+#| label: fig-flo-marriage
+#| fig-cap: "Marriage network among Florentine families. Node size is proportional to the wealth of each family."
+
+ggraph(flo_marriage_sub, "stress") +
+  geom_edge_link0(edge_color = "grey66") +
+  geom_node_point(
+    shape = 21,
+    aes(size = wealth),
+    fill = "grey66",
+    show.legend = FALSE
+  ) +
+  geom_node_text(aes(size = wealth, label = name), show.legend = FALSE) +
+  theme_void()
+```
+
+```{r}
+#| label: centralities-flo
+
+data.frame(
+  name = V(flo_marriage_sub)$name,
+  degree = rank(-degree(flo_marriage_sub)),
+  betweenness = rank(-betweenness(flo_marriage_sub)),
+  closeness = rank(-closeness(flo_marriage_sub)),
+  eigen = rank(-eigen_centrality(flo_marriage_sub)$vector)
+) |>
+  knitr::kable(
+    row.names = FALSE,
+    col.names = c("Family", "Degree", "Betweenness", "Closeness", "Eigenvector")
+  )
+```
+
+The Medici rank first (or nearly first) on every index. Their high degree means they had the most marriage ties, making them the most active family in forming alliances. Their top betweenness ranking reveals that they occupied a critical brokerage position: many of the shortest paths between other families passed through them, giving the Medici control over the flow of information and political favors. Their high closeness means they could reach any other family through fewer intermediaries than anyone else. And their eigenvector centrality shows that they were not just well-connected, but connected to other well-connected families.
+
+The Strozzi, despite their wealth, were structurally peripheral. Their marriage ties connected them to less central families, limiting their ability to broker relationships or influence the network as a whole. This case illustrates a key insight of network analysis: structural position can matter more than individual attributes like wealth.
+
+To characterize the network as a whole:
+
+```{r}
+c(
+  degree = centr_degree(flo_marriage_sub)$centralization,
+  betweenness = centr_betw(flo_marriage_sub)$centralization,
+  closeness = centr_clo(flo_marriage_sub)$centralization,
+  eigen = centr_eigen(flo_marriage_sub)$centralization
+)
+```
+
+Eigenvector centralization is the largest, reflecting that prestige in this network is concentrated in a tightly connected core around the Medici. Betweenness centralization is also high and confirms that brokerage was in the hands of a few families. Degree and closeness are more evenly spread, which fits the intuition that several families were reasonably active and well-positioned even if none were as dominant as the Medici on a structural measure.
+
+# Beyond a Single Index
+
+## Neighborhood Inclusion
+
+If every neighbor of node $u$ is also a neighbor of another node $v$, the $u$ is in a structurally weaker position because whatever node $u$ can reach, $v$ can too, and more. This property holds for every centrality index, if $u$ is neighborhood-dominated by $v$, no index will rank $u$ above $v$.
+
+The function `neighborhood_inclusion()` returns a matrix `P` where `P[u, v] = 1` whenever $u$ is dominated by $v$. The helper `comparable_pairs()` reports what fraction of node pairs the partial order actually orders.
+
+```{r}
+P <- neighborhood_inclusion(dbces11)
+comparable_pairs(P)
+```
+
+Only about 16% of pairs are comparable in dbces11. The other 84% are structurally ambiguous, and that ambiguity is exactly the room in which different indices can disagree. In a network where every pair is comparable, all indices would produce the same ranking.
+
+## Rank Intervals
+
+For a partially ordered set of nodes, every centrality index is one particular linear extension, a total ordering that respects the partial order. `rank_intervals()` reports, for each node, the smallest and largest rank it can take across all such extensions. Wide intervals mean the structure leaves the node’s position open; narrow intervals mean the structure pins it down.
+
+```{r}
+(rk_int <- rank_intervals(P))
+```
+
+```{r}
+#| label: fig-rank-intervals-dbces
+#| fig-cap: "Rank intervals for dbces11 with the ranks produced by four centrality indices overlaid. Points scattered widely within an interval indicate indices disagree about that node's position."
+
+cent_scores <- data.frame(
+  degree = degree(dbces11),
+  betweenness = round(betweenness(dbces11), 4),
+  closeness = round(closeness(dbces11), 4),
+  eigenvector = round(eigen_centrality(dbces11)$vector, 4)
+)
+plot(rk_int, cent_scores = cent_scores)
+```
+
+## Exact Rank Probabilities
+
+Rather than picking one index, we can enumerate every linear extension of the partial order and ask, for each node, how often it lands at each rank. For small graphs, `exact_rank_prob()` does this exhaustively. On larger networks, `exact_rank_prob()` becomes infeasible, but `neighborhood_inclusion()` and `rank_intervals()` remain cheap and still reveal which rankings the structure forces and which it leaves open.
+
+```{r}
+res <- exact_rank_prob(P)
+```
+The probability of being the most central node (top rank) is the last column of `res$rank.prob`.
+
+```{r}
+round(res$rank.prob[, ncol(res$rank.prob)], 2)
+```
+
+Nodes E and K share the highest probability (0.16) of occupying the top rank across all valid rankings, closely followed by D and H. The expected rank, the weighted average of a node’s rank over all extensions, gives a single summary.
+
+```{r}
+round(res$expected.rank, 2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
