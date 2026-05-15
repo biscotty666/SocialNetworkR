@@ -1,0 +1,308 @@
+---
+title: "Signed Networks"
+format: gfm
+---
+
+[Source](https://schochastics.github.io/R4SNA/descriptive/signed-networks.html)
+
+```{r}
+options(paged.print = FALSE)
+```
+
+```{r}
+#| message: false
+
+libraries <- list(
+  "igraph", "networkdata", "signnet",
+  "patchwork", "ggraph"
+)
+invisible(lapply(libraries, library, character.only = TRUE))
+```
+
+Signed networks capture "negative" connections, eg. dislikes as well as likes.
+
+# Basics
+
+Requires an `igraph` object with an edge attribute `sign` which is 1 for positive and -1 for negative. Signed networks are represented by a signed adjacency matrix.
+
+We will use the tribes dataset to illustrate some basic functionality of the package. This dataset is a signed social network of sixteen tribes from the Gahuku-Gama alliance structure of the Eastern Central Highlands of New Guinea. Tribes are connected by friendship ties (“rova”) and enmity ties (“hina”).
+
+```{r signed-networks-1}
+ggsigned(tribes)
+```
+
+With `weights = TRUE`, negative ties are stretched apart.
+
+```{r signed-networks-2}
+ggsigned(tribes, weights = TRUE)
+```
+
+```{r}
+as_adj_signed(tribes)
+```
+
+# Structural balance
+
+Four possible configurations of three nodes are possible. Two are _balanced_, two are _unbalanced_. Balanced configurations are all friends or "the enemy of my enemy is my friend", ie. two enemy ties and one friend tie. A network is balanced if it can be partitioned into two groups such that all ties within groups are positive and all ties between groups are negative.
+
+```{r}
+#| label: fig-balance-triples
+#| fig-cap: "The four possible signed triangles and their balancedness."
+
+make_signed_triangle <- function(signs) {
+  g <- make_graph(c(1, 2, 2, 3, 1, 3), directed = FALSE)
+  E(g)$sign <- signs
+  g
+}
+
+plot_triangle <- function(g, title) {
+  E(g)$col <- ifelse(E(g)$sign == 1, "#104E8B", "firebrick3")
+  edge_labels <- ifelse(E(g)$sign == 1, "+", "\u2013")
+  ggraph(g, layout = "manual", x = c(-1, 1, 0), y = c(0, 0, sqrt(3))) +
+    geom_edge_link(
+      aes(label = edge_labels, edge_color = I(col)),
+      edge_width = 1.2,
+      label_size = 6,
+      angle_calc = "across",
+      label_push = unit(-3, "mm")
+    ) +
+    geom_node_point(size = 5, color = "grey30") +
+    theme_graph() +
+    theme(plot.title = element_text(hjust = 0.5, size = 11))
+}
+
+t1 <- make_signed_triangle(c(1, 1, 1))
+t2 <- make_signed_triangle(c(-1, -1, 1))
+t3 <- make_signed_triangle(c(1, 1, -1))
+t4 <- make_signed_triangle(c(-1, -1, -1))
+
+p1 <- plot_triangle(t1, "+++") +
+  theme(axis.title.x = element_text(face = "bold", size = 12)) +
+  scale_x_continuous(name = "balanced")
+p2 <- plot_triangle(t2, "+\u2013\u2013") +
+  theme(axis.title.x = element_text(face = "bold", size = 12)) +
+  scale_x_continuous(name = "balanced")
+p3 <- plot_triangle(t3, "++\u2013") +
+  theme(axis.title.x = element_text(face = "bold", size = 12)) +
+  scale_x_continuous(name = "unbalanced")
+p4 <- plot_triangle(t4, "\u2013\u2013\u2013") +
+  theme(axis.title.x = element_text(face = "bold", size = 12)) +
+  scale_x_continuous(name = "unbalanced")
+
+
+p1 + p2 + p3 + p4 + plot_layout(ncol = 2, axis = "collect_x")
+```
+
+Create a simple balanced network. If more than two islands are created, they are clusterable into more than two groups with the same relationship.
+
+```{r signed-networks-3}
+g_bal <- sample_islands_signed(
+  islands.n = 2,
+  islands.size = 10,
+  islands.pin = 0.8,
+  n.inter = 5
+)
+ggsigned(g_bal)
+```
+
+Verify that all triangles are balanced.
+
+```{r}
+count_signed_triangles(g_bal)
+```
+
+Real-world networks are rarely perfectly balanced, so one of three scoring methods can be used, with 0 perfectly unbalanced and 1 perfectly balanced. 
+
+- `triangles` returns the fraction of balanced triangles
+- `walk` uses eigenvalues of the signed and unsigned adjacency matrices to capture balance at all scales not just triangles
+- `frustration` finds a partition and counts how many edges violate the balance pattern. Finding the optimal partition is computationally hard. For exact results, use `frustration_exact()`.
+
+```{r}
+balance_score(g_bal, method = "triangles")
+balance_score(g_bal, method = "walk")
+balance_score(g_bal, method = "frustration")
+```
+
+```{r}
+balance_score(tribes, method = "triangles")
+balance_score(tribes, method = "walk")
+balance_score(tribes, method = "frustration")
+```
+
+# Blockmodeling
+
+Balanced networks can be partitioned into groups with positive intra-group and negative inter-group ties. `signed_blockmodel()` partitions a network into `k` predefined blocks, optimizing for such structure by optimizing $P(C) = \alpha N + (1-\alpha)P$ where $N$ is the total number of negative ties within blocks and $P$ is the total number of positive ties between blocks. `alpha` near 1 prioritizes negative ties within blocks, near 0 priorities positive ties between blocks.
+
+Attemps to divide `tribes` into three blocks.
+
+```{r}
+set.seed(1108)
+clu <- signed_blockmodel(tribes, k = 3,
+                         alpha = 0.5, annealing = T)
+clu$membership
+```
+
+```{r}
+clu$criterion
+```
+
+2 edges violate the criterion, and can be seen here.
+
+```{r signed-networks-4}
+ggblock(tribes, clu$membership, show_blocks = T)
+```
+
+The function signed_blockmodel_general() allows us to specify arbitrary block structures via the blockmat parameter. Each entry in the matrix indicates whether we expect the corresponding block to be positive (1) or negative (-1).
+
+In the following we construct a synthetic network with three groups, with a structure which cannot be captured by the traditional blockmodel but can be specified in the general blockmodel.
+
+```{r}
+#| label: fig-general-setup
+#| fig-cap: "A synthetic network with a non-standard block structure."
+
+g1 <- g2 <- g3 <- make_full_graph(5)
+V(g1)$name <- as.character(1:5)
+V(g2)$name <- as.character(6:10)
+V(g3)$name <- as.character(11:15)
+
+g <- Reduce("%u%", list(g1, g2, g3))
+E(g)$sign <- 1
+E(g)$sign[1:10] <- -1
+g <- add_edges(g, c(rbind(1:5, 6:10)), attr = list(sign = -1))
+g <- add_edges(g, c(rbind(1:5, 11:15)), attr = list(sign = -1))
+g <- add_edges(g, c(rbind(11:15, 6:10)), attr = list(sign = 1))
+ggsigned(g, weights = T)
+```
+
+Groups 2 and 3 have positive ties between them, while both have negative ties to group 1. The block structure matrix reflecting this is
+
+```{r}
+set.seed(1108)
+(blockmat <- matrix(
+  c(1, -1, -1, -1, 1, 1, -1, 1, -1),
+  3, 3, byrow = T
+))
+```
+
+```{r}
+general <- signed_blockmodel_general(g, blockmat, alpha = 0.5)
+general$criterion
+```
+
+```{r signed-networks-5}
+#| label: fig-general-blockmodel
+#| fig-cap: "Block structure of the synthetic network with a non-standard block structure."
+
+ggblock(g, general$membership, show_blocks = TRUE)
+```
+
+Without specifying the correct block structure, the results are poor.
+
+```{r}
+traditional <- signed_blockmodel(
+  g, k = 3, alpha = 0.5, annealing = TRUE
+  )
+c(general = general$criterion, 
+  traditional = traditional$criterion)
+```
+
+# Centrality
+
+Indices must not just count ties but consider negative ties differently than positive ties. Four variants are possible.
+
+- `type = "pos"`: count only positive neighbors
+- `type = "neg"`: count only negative neighbors
+- `type = "ratio"`: positive neighbors / (positive + negative neighbors)
+- `type = "net"`: positive neighbors minus negative neighbors
+
+Directed networks also use `mode` to distinguish "in" and "out" version.
+
+```{r}
+data.frame(
+  tribe = V(tribes)$name,
+  pos = degree_signed(tribes, type = "pos"),
+  neg = degree_signed(tribes, type = "neg"),
+  ratio = round(degree_signed(tribes, type = "ratio"), 2),
+  net = degree_signed(tribes, type = "net")
+)
+```
+
+_PN index_ takes into account indirect as well as direct ties. _Eigenvector centrality_ considers a node central is it is connected to other central nodes.
+
+```{r}
+(cent_df <- data.frame(
+  tribe = V(tribes)$name,
+  degree_net = degree_signed(tribes, type = "net"),
+  eigen = round(eigen_centrality_signed(tribes), 3),
+  pn = round(pn_index(tribes), 3)
+))
+```
+
+To see how much the measures agree
+
+```{r}
+cor(eigen_centrality_signed(tribes), pn_index(tribes), method = "kendall")
+```
+
+
+# Example - International Relations
+
+The `cowList` dataset (included in the `signnet` package; see Doreian and Mrvar (2015)) contains 51 signed networks of inter-state relations in overlapping four-year windows from 1946 to 1999, derived from the Correlates of War project. Two countries are connected by a positive tie if they formed an alliance or signed a peace treaty, and by a negative tie if they were at war or involved in other conflicts.
+
+```{r}
+names(cowList)[c(1, 20, 51)]
+```
+
+Each network covers a four-year window (e.g., “65-68” covers 1965–1968). Let us examine two snapshots: one from the height of the Cold War and one from the post-Cold War period.
+
+```{r}
+cowList <- lapply(cowList, upgrade_graph)
+
+cow_cold <- cowList[["65-68"]]
+cow_post <- cowList[["93-96"]]
+
+c(
+  nodes_cold = vcount(cow_cold),
+  edges_cold = ecount(cow_cold),
+  nodes_post = vcount(cow_post),
+  edges_post = ecount(cow_post)
+)
+```
+
+```{r}
+data.frame(
+  method = c("triangles", "walk", "frustration"),
+  cold_war = c(
+    balance_score(cow_cold, method = "triangles"),
+    balance_score(cow_cold, method = "walk"),
+    balance_score(cow_cold, method = "frustration")
+  ),
+  post_cold_war = c(
+    balance_score(cow_post, method = "triangles"),
+    balance_score(cow_post, method = "walk"),
+    balance_score(cow_post, method = "frustration")
+  )
+)
+```
+
+The expectation during the Cold War is that there would be blocks corresponding to Western and Eastern alliances.
+
+```{r signed-networks-6}
+set.seed(1108)
+clu_cold <- signed_blockmodel(cow_cold, k = 2,
+                              alpha = 0.5, annealing = T)
+ggblock(cow_cold, clu_cold$membership, show_blocks = T)
+```
+
+```{r}
+split(V(cow_cold)$name, clu_cold$membership)
+```
+
+
+
+
+
+
+
+
+
