@@ -1,0 +1,282 @@
+---
+title: "Two-Mode Networks"
+format: gfm
+---
+
+[Source](https://schochastics.github.io/R4SNA/descriptive/two-mode-networks.html)
+
+```{r}
+options(paged.print = FALSE)
+```
+
+```{r}
+#| message: false
+
+libraries <- list(
+  "igraph", "networkdata", "tnet",
+  "backbone", "ggraph", "tidyverse"
+)
+invisible(lapply(libraries, library, character.only = TRUE))
+```
+
+
+Two-mode network data represent situations like
+
+- Affiliation networks (membership in institutions/clubs)
+- Voting/sponsorship networks (politicians and bills)
+- Citation networks (authors and papers)
+- Co-authorship networks (also authors and papers)
+
+The can be analyzed directly or projected onto a one-mode network, the latter approach being more popular.
+
+# Data Structure
+
+Stored as an _incidence matrix_ or _biadjacency matrix_, with rows for one type of node and columns for the other type. Entries indicated ties existing across the two sets. Two-mode networks are especially useful for analyzing how connections emerge indirectly, for example, when two individuals are linked because they attend the same event or belong to the same organization.
+
+`igraph` recognizes a two-mode network if it contains a logical attribute named `type`. One mode is `FALSE` and the other is `TRUE`.
+
+To illustrate methods tailored for two-mode networks, we will use the well-known Southern Women dataset (Davis et al. 2009). This classic dataset records the attendance patterns of 18 women at 14 social events in the American South, and has become a foundational example in network analysis. 
+
+```{r}
+southern_women
+```
+
+```{r}
+(A <- as_biadjacency_matrix(southern_women))
+```
+
+```{r}
+#| label: fig-incmat
+#| message: false
+#| fig-cap: "Incidence matrix representation of the Southern Women two-mode network. Rows correspond to the 18 women and columns to the 14 social events; black cells indicate attendance at an event, and white cells indicate non-attendance."
+
+# Convert to tidy format
+df <- as.data.frame(A) %>% 
+  rownames_to_column("woman") %>% 
+  pivot_longer(-woman, names_to = "event", values_to = "attend") %>% 
+  mutate(
+    attend = as.integer(attend > 0),
+    # Reverse row order so first woman appears at top
+    woman = factor(woman, levels = rev(unique(woman))),
+    event = factor(event, levels = unique(event))
+  )
+
+# Plot incidence matrix (black = tie, white = no tie)
+ggplot(df, aes(x = event, y = woman, fill = factor(attend))) +
+  geom_tile(color = "grey70", linewidth = 0.3) +
+  scale_fill_manual(values = c("0" = "white", "1" = "black"), guide = "none") +
+  coord_fixed() +
+  labs(
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+```{r}
+#| label: fig-southern-women-plot
+#| fig-height: 7
+#| fig-width: 9
+
+ggraph(southern_women, "stress") +
+  geom_edge_link0(edge_color = "grey66") +
+  geom_node_point(
+    aes(fill = type, shape = type),
+    size = 8,
+    show.legend = FALSE
+  ) +
+  geom_node_text(aes(label = name)) +
+  scale_shape_manual(values = c(21, 22)) +
+  theme_void()
+```
+
+To see how many vertices belong to each mode:
+
+```{r}
+table(V(southern_women)$type)
+```
+
+# Direct Approach
+
+Since closed triplets of nodes do not exist, the definition of transitivity must be adapted.
+
+```{r}
+transitivity(southern_women); transitivity(southern_women, type = "local")
+```
+
+`tnet` defines a two-mode clustering coefficient based on cycles of length six, eg. woman $\rightarrow$ event $\rightarrow$ woman $\rightarrow$ event $\rightarrow$ woman $\rightarrow$ event $\rightarrow$ back to the first woman.
+
+```{r}
+el_women <- as_edgelist(southern_women, names = F)
+```
+
+Global clustering (first mode)
+
+```{r}
+clustering_tm(el_women)
+```
+
+Local clustering (first mode).
+
+```{r}
+clustering_local_tm(el_women)
+```
+
+Local clustering (second mode).
+
+```{r}
+clustering_local_tm(el_women[, 2:1])
+```
+
+`NaN` values indicated the node does not participate in any valid six-cycle. This approach is computationally intensive.
+
+# Projection Approach
+
+Nodes from one mode are connected if they share ties to the same nodes in the other mode. They can be weighted or binary.
+
+## Weighted Projection
+
+Projection onto the first mode is $AA^T$, projecting onto the second mode is $A^TA$. The result is a weighted adjacency matrix, with entries indicating the number of shared affiliations.
+
+```{r}
+(B <- A %*% t(A))
+```
+
+Alternatively, with `igraph`
+
+```{r}
+(projs <- bipartite_projection(southern_women))
+```
+
+```{r}
+#| label: fig-plot_weighted_proj
+#| fig-height: 8
+#| fig-width: 10
+#| fig-cap: "Weighted projection of the Southern Women network onto the women."
+
+proj <- graph_from_adjacency_matrix(
+  B,
+  weighted = TRUE,
+  diag = FALSE,
+  mode = "undirected"
+)
+
+ggraph(proj, "stress") +
+  geom_edge_link0(
+    aes(edge_linewidth = weight),
+    edge_color = "grey66",
+    show.legend = FALSE
+  ) +
+  geom_node_point(shape = 21, fill = "tomato", size = 8, show.legend = FALSE) +
+  geom_node_text(aes(label = name)) +
+  scale_edge_width(range = c(1, 4)) +
+  theme_graph() +
+  coord_cartesian(clip = "off")
+```
+
+This is commonly binarized for analysis.
+
+## Simple Binary Projections
+
+A simple way is to define a global threshold for turning weights into binary. This can be the mean edge weight, sometimes adjusted upwards by 1-2 standard deviations. In many projected networks, the distribution of edge weights is highly skewed, with most pairs sharing only one or two affiliations. 
+
+The appropriate threshold depends on the research question: lower thresholds preserve more information but may produce very dense graphs, while higher thresholds emphasize strong ties but risk discarding meaningful structure. 
+
+```{r}
+women_proj <- projs$proj1
+threshold <- mean(E(projs$proj1)$weight)
+women_bin <- delete_edges(
+  women_proj, which(E(women_proj)$weight <= threshold)
+)
+(women_bin <- delete_edge_attr(women_bin, "weight"))
+```
+
+Connections now only show stronger-than-average shared-event ties.
+
+```{r}
+#| label: fig-southern-women-bin-plot
+#| fig-cap: "Binary projection of the Southern Women network onto the women using a global threshold based on the mean edge weight."
+#| fig-height: 11
+#| fig-width: 11
+
+ggraph(women_bin, "stress", bbox = 5) +
+  geom_edge_link0(edge_color = "grey66") +
+  geom_node_point(shape = 21, fill = "tomato", size = 8) +
+  geom_node_text(aes(label = name)) +
+  theme_graph() +
+  coord_cartesian(clip = "off")
+```
+
+## Model-based Binary Projections
+
+Statistical models which determine if an edge weight differs enough from the expected value of an underlying null model to keep the edge in the binary projection.
+
+The idea is:
+
+1. Create the weighted projection of interest, eg. `B <- A%*%t(A)`
+2. Generate random two-mode networks according to a given model
+3. Compare if the values `B[i,j]` differ significantly from the distribution of values in the random projections.
+
+The difference is in the construction of the random networks:
+
+- _Fixed Degree Sequence Model_ `fdsm`: Create random two-mode networks with the same row and column sums as `A`.
+- _Fixed Column Model_ `fixedcol`: Create random two-mode networks with the same column sums as `A`.
+- _Fixed Row Model_ `fixedrow`: Create random two-mode networks with the same row sums as A.
+- _Fixed Fill Model_ `fixedfill`: Create random two-mode networks with the same number of ones as A.
+- _Stochastic Degree Sequence Model_ `sdsm`: Create random two-mode networks with approximately the same row and column sums as A.
+
+In general you can follow these rough questions:
+
+1. Use the model that fits your empirical setting or a known link formation process. If that link formation process dictates that row sums are fixed but column sums not, then choose fixedrow.
+2. Use fdsm if your network is small enough. Sampling from the FDSM is quite expensive.
+3. Use the sdsm for large networks.
+
+To illustrate model fitting in a substantive setting, we use a bill cosponsorship network from the U.S. Senate in 2015 (available in the networkdata package). The data form a two-mode network in which one set of nodes represents senators and the other represents bills; a tie between a senator and a bill indicates sponsorship or cosponsorship. We are interested in examining the binary one-mode projection onto senators, i.e., a network in which two senators are connected if they sponsored at least one bill together.
+
+```{r}
+cosponsor
+```
+
+Because the network is large, use SDSM. The projection is onto the nodes with `type = FALSE`. For `type = TRUE`, the `type` attribute must be inverted.
+
+```{r}
+(senators <- backbone_from_projection(
+  cosponsor,
+  model = "sdsm",
+  alpha = 0.05,
+  signed = FALSE
+))
+```
+
+If `signed = FALSE`, ties are retained only if the co-sponsorship strength is greater tahn expected from a null model at the significance level `alpha`. If `signed = TRUE`, negative results for less than expected strength of co-sponsorship, with positive numbers showing greater than expected.
+
+```{r}
+#| label: fig-cosponsor-plot
+#| fig-height: 6
+#| fig-width: 8
+#| fig-cap: "Backbone projection of the U.S. Senate cosponsorship network, with nodes colored by party affiliation. Edges represent statistically significant co-sponsorship ties based on the SDSM null model."
+
+V(senators)$party <- V(cosponsor)$party[match(
+  V(senators)$name,
+  V(cosponsor)$name
+)]
+senators <- largest_component(senators)
+party_cols <-
+  c(D = "#104E8B", R = "#CD3333", I = "#EEB422")
+ggraph(senators, "stress") +
+  geom_edge_link0(edge_linewidth = 0.1, edge_color = "grey66") +
+  geom_node_point(shape = 21, aes(fill = party), size = 4) +
+  scale_fill_manual(values = party_cols) +
+  theme_graph() +
+  theme(legend.position = "bottom")
+```
+
+This reveals strong polarization, with a small number of edges spanning the gap, and a few senators positioned as "brokers".
+
+
+
+
+
+
+
