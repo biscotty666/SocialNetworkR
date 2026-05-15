@@ -31,6 +31,18 @@
             igraph
           ];
         };
+        myBackbone = pkgs.rPackages.buildRPackage {
+          name = "backbone";
+          src = pkgs.fetchFromGitHub {
+            owner = "zpneal";
+            repo = "backbone";
+            rev = "9a584b4e56d633eb5ca04a15e7849ec5ff4daa2d";
+            sha256 = "VPovHY5TXt8wB0QEHb0GzM0jVk8yVSy7Vk5EEDkhnRU=";
+          };
+          propagatedBuildInputs = with pkgs.rPackages; [
+            igraph Rcpp Matrix 
+          ];
+        };
       in
       {
         devShells.default = pkgs.mkShell {
@@ -43,7 +55,8 @@
             texlive.combined.scheme-full
             rstudio
             (with rPackages; [
-              backbone
+              # backbone
+              myBackbone
               blockmodeling
               egor
               igraph
