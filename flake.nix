@@ -78,6 +78,7 @@
               relevent
               signnet
               statnet
+              styler
               threejs
               tidygraph
               tidyverse
