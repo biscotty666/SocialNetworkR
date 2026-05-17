@@ -68,14 +68,17 @@
               intergraph
               knitr
               MASS
+              maps
               netrankr
               netropy
               networkD3
               networkdata
               netUtils
+              oaqc
               patchwork
               RSiena
               relevent
+              sf
               signnet
               statnet
               styler
@@ -84,6 +87,7 @@
               tidyverse
               tnet
               visNetwork
+              zeallot
             ])
           ];
           shellHook = "";
