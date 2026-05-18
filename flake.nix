@@ -43,6 +43,18 @@
             igraph Rcpp Matrix 
           ];
         };
+        myg6R = pkgs.rPackages.buildRPackage {
+          name = "g6R";
+          src = pkgs.fetchFromGitHub {
+            owner = "cynkra";
+            repo = "g6R";
+            rev = "901f6aa04206cc19b388c788c087ede3ddc3da6f";
+            sha256 = "d0o0sj6sqnCnu2xfg7/hFzhqXD/pLXQRFIpycCEf60k=";
+          };
+          propagatedBuildInputs = with pkgs.rPackages; [
+            igraph Rcpp htmlwidgets shiny
+          ];
+        };
         myNetropy = pkgs.rPackages.buildRPackage {
           name = "netropy";
           src = pkgs.fetchFromGitHub {
@@ -72,11 +84,13 @@
               blockmodeling
               egor
               igraph
-              g6R
+              myg6R
+              # g6R
               GA
               ggforce
               ggraph
               graphlayouts
+              htmlwidgets
               intergraph
               knitr
               MASS
@@ -101,6 +115,7 @@
               tidyverse
               tnet
               visNetwork
+              webshot2
               zeallot
             ])
           ];
