@@ -92,6 +92,7 @@
               RSiena
               relevent
               sf
+              shadowtext
               signnet
               statnet
               styler
