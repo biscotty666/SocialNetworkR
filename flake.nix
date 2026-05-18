@@ -43,6 +43,18 @@
             igraph Rcpp Matrix 
           ];
         };
+        myNetropy = pkgs.rPackages.buildRPackage {
+          name = "netropy";
+          src = pkgs.fetchFromGitHub {
+            owner = "termehs";
+            repo = "netropy";
+            rev = "a35d1272f6ea6b36437c3c23abbe24e02dbf6443";
+            sha256 = "//fn5H2fZqJuolB2SzwzcVAXEBigGCPHVRdpDIN6n44=";
+          };
+          propagatedBuildInputs = with pkgs.rPackages; [
+            igraph Rcpp ggraph ggplot2
+          ];
+        };
       in
       {
         devShells.default = pkgs.mkShell {
@@ -70,7 +82,8 @@
               MASS
               maps
               netrankr
-              netropy
+              # netropy
+              myNetropy
               networkD3
               networkdata
               netUtils
