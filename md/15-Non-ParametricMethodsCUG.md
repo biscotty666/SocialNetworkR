@@ -1,0 +1,786 @@
+# Non-Parametric Methods
+
+
+[Source](https://schochastics.github.io/R4SNA/inferential/non-parametric.html)
+
+``` r
+options(paged.print = FALSE)
+```
+
+``` r
+libraries <- list(
+  "igraph", "statnet", "ggraph","graphlayouts", 
+  "networkdata", "patchwork", "tidyverse", "tidygraph"
+)
+invisible(lapply(libraries, library, character.only = TRUE))
+```
+
+# Conditional Uniform Graph Distributions
+
+Defines a reference distribution based on uniformly generated graphs
+conditionedd on one or more fixed characteristics of the observed
+network, eg. number of nodes, degree distribution, etc.
+
+Several types of CUGs can be defined:
+
+- **$\mathcal{U} \mid \rho$**: All graphs with the same density as the
+  observed graph.
+- **$\mathcal{U} \mid L$**: All graphs with the same number of edges as
+  the observed graph.
+- **$\mathcal{U} \mid d$**: All graphs with the same degree distribution
+  $d = (d_1, d_2, \dots, d_n)$.
+- **$\mathcal{U} \mid MAN$**: All directed graphs with the same dyad
+  census (i.e., counts of mutual, asymmetric, and null dyads).
+
+# Hypothesis testing procedure
+
+The process follows classical null hypothesis testing logic:
+
+- **Null Hypothesis ($H_{0}$):** The observed network is drawn from a
+  CUG model that preserves a given constraint (e.g., edge count).
+- **Alternative Hypothesis ($H_{1}$):** The observed network structure
+  is not typical under this model and thus suggests a non-random social
+  mechanism.
+
+To test $H_0$ we follow the below steps:
+
+1.  Define a summary statistic (e.g., degree centralization, reciprocity
+    or transitivity).
+2.  Generate a large number of networks from the CUG distribution.
+3.  Compute the statistic for each simulated network.
+4.  Compare the observed statistic to the simulated distribution for
+    that statistic.
+
+These are Monte Carlo tests, so the p-value is the proportion of
+simulated test statistics as or more extreme than observed value.
+
+``` r
+# Create an observed graph
+set.seed(1108)
+obs_graph <- sample_smallworld(1, 50, nei = 5, p = 0.15)
+
+# Compute observed centralization
+obs_measure <- centr_degree(obs_graph)$centralization
+```
+
+``` r
+# Simulate null distribution
+n_sim <- 500
+null_vals <- replicate(n_sim, {
+  g_sim <- sample_gnm(vcount(obs_graph), ecount(obs_graph))
+  centr_degree(g_sim)$centralization
+})
+```
+
+``` r
+df <- data.frame(centralization = null_vals)
+
+hist_plot <- ggplot(df, aes(x = centralization)) +
+  geom_histogram(binwidth = 0.02, fill = "skyblue", color = "white") +
+  geom_vline(
+    xintercept = obs_measure,
+    linetype = "dashed",
+    color = "firebrick3"
+  ) +
+  annotate(
+    "text",
+    x = obs_measure,
+    y = max(table(cut(null_vals, breaks = 30))) + 2,
+    label = "observed value",
+    color = "firebrick3",
+    angle = 90,
+    vjust = -0.5,
+    hjust = 1
+  ) +
+  labs(
+    title = "Null distribution of statistic of interest",
+    x = " ",
+    y = "Frequency"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+``` r
+net_plot <- ggraph(obs_graph, layout = "fr") +
+  geom_edge_link(color = "lightgrey") +
+  geom_node_point(size = 3, color = "black") +
+  theme_void() +
+  labs(title = "Observed network") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+<img
+src="15-Non-ParametricMethodsCUG_files/figure-commonmark/nullmodel-ex-1.png"
+data-fig-align="center" />
+
+# Running example
+
+The data consists of self-reported friendship ties among 73 boys in a
+small high school in Illinois over the 1957-1958 academic year. Networks
+of reported ties for all 73 informants are provided for two time points
+(fall and spring). We will only focus on the fall network here, which we
+load and visualize.
+
+``` r
+coleman_g <- coleman[[1]]
+
+ggraph(coleman_g, layout = "stress") +
+  geom_edge_link(
+    edge_color = "#666060", edge_width = 0.4,
+    edge_alpha = 0.7, end_cap = circle(9, "pt"),
+    n = 2, 
+    arrow = arrow(
+      angle = 15, length = unit(0.1, "inches"),
+      ends = "last", type = "closed"
+    )
+  ) +
+  geom_node_point(
+    fill = "#525240", color = "#FFFFFF",
+    size = 5, stroke = 1.1, shape = 21
+  ) +
+  theme_graph() +
+  ggtitle("fall friendship network") +
+  theme(legend.position = "none")
+```
+
+![](15-Non-ParametricMethodsCUG_files/figure-commonmark/r4sna-cug-1-1.png)
+
+# Uniform Graph Distribution Given Expected Density
+
+Do we observe significantly more reciprocal ties in our observed network
+than what is expected by pure chance given random networks of the same
+expected density?
+
+``` r
+dyad_census(coleman_g)
+```
+
+    $mut
+    [1] 62
+
+    $asym
+    [1] 119
+
+    $null
+    [1] 2447
+
+``` r
+sum(which_mutual(coleman_g)) / 2
+```
+
+    [1] 62
+
+``` r
+density_obs <- edge_density(coleman_g)
+n_nodes <- vcount(coleman_g)
+```
+
+Simulate 1000 random graphs with same density
+
+``` r
+set.seed(1108)
+sim_g_dens <- replicate(
+  1000,
+  {
+    sample_gnp(n = n_nodes, p = density_obs, 
+               directed = TRUE, loops = FALSE)
+  },
+  simplify = FALSE
+)
+```
+
+The output is 1000 randomly generated networks as graph objects. The
+networks may not contain the same number of edges, but they are
+**stochastically equivalent** in terms of overall density.
+
+``` r
+count_mutual <- function(g) {
+  sum(which_mutual(g)) / 2
+}
+
+mutual_counts <- sapply(sim_g_dens, count_mutual)
+mutual_counts_df <- data.frame(
+  mutual_ties = mutual_counts
+)
+
+mutual_counts_df %>% 
+  ggplot(aes(x = mutual_ties)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "white") +
+  geom_vline(
+    xintercept = dyad_census(coleman_g)$mut,
+    color = "firebrick", linetype = "dashed"
+  ) +
+  annotate(
+    "text", x = dyad_census(coleman_g)$mut, y = Inf,
+    label = "Observed", vjust = -0.5, hjust = 1.1,
+    color = "firebrick", angle = 90
+  ) +
+  labs(title = " ", x = "Number of Mutual Ties", y = "Frequency") +
+  theme_minimal()  
+```
+
+![](15-Non-ParametricMethodsCUG_files/figure-commonmark/r4sna-cug-2-1.png)
+
+As shown in the plot, the observed number of mutual ties falls far in
+the right tail of the distribution. This indicates a substantial
+deviation from what would be expected under random tie formation. This
+can be interpreted as follows:
+
+    If ties in the network were allocated completely at random, while preserving the overall density, it would be highly unlikely to observe as many reciprocal ties as we do in the actual network.
+
+Stated more formally, this analysis serves as a test of the following
+null hypothesis:
+
+    $H_0$: The number of mutual ties in the observed network does not differ from what would be expected under random tie formation, given the observed network density.
+
+    $H_1$: The observed number of mutual ties is significantly greater than expected by chance, indicating a tendency toward reciprocity beyond what density alone would predict.
+
+Since the observed number of mutual ties falls far in the right tail of
+the simulated distribution, we see a clear and substantial deviation
+from the null model. Therefore, we reject the null hypothesis,
+concluding that the observed network exhibits significantly more
+reciprocity than would be expected by random chance alone. This
+indicates a strong tendency for mutual connections in the network that
+is not explained by density alone.
+
+``` r
+(p_value <- mean(mutual_counts >= dyad_census(coleman_g)$mut))
+```
+
+    [1] 0
+
+The `rgraph()` function from the `sna` (or `statnet`) package can also
+be used to simulate random networks with a specified expected density.
+However, note that its output consists of adjacency matrices (as a 3D
+array or list), rather than `igraph` objects. This requires additional
+conversion before applying `igraph`-based analyses.
+
+# Uniform Graph Distribution Given Number of Edges
+
+In this section, we perform the same test but condition the random
+networks generated on the exact number of edges. So out null world is
+now stated as
+
+    $H_0$: The number of mutual ties in the observed network is consistent with what would be expected under random edge assignment, given a fixed number of nodes and edges.
+
+``` r
+set.seed(1108)
+n_nodes <- vcount(coleman_g)
+n_edges <- ecount(coleman_g)
+
+sim_g_edges <- replicate(
+  1000,
+  {
+    g <- sample_gnm(n = n_nodes, m = n_edges,
+                    directed = T, loop = T)
+  },
+  simplify = F
+)
+```
+
+``` r
+mutual_df_edges <- data.frame(
+  mutual_ties = sapply(sim_g_edges, count_mutual)
+)
+
+ggplot(mutual_df_edges, aes(x = mutual_ties)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "white") +
+  geom_vline(
+    xintercept = dyad_census(coleman_g)$mut,
+    color = "firebrick3",
+    linetype = "dashed"
+  ) +
+  annotate(
+    "text",
+    x = dyad_census(coleman_g)$mut,
+    y = Inf,
+    label = "Observed",
+    vjust = -0.5,
+    hjust = 1.1,
+    color = "firebrick3",
+    angle = 90
+  ) +
+  labs(title = " ", x = "Number of Mutual Ties", y = "Frequency") +
+  theme_minimal()
+```
+
+![](15-Non-ParametricMethodsCUG_files/figure-commonmark/r4sna-cug-3-1.png)
+
+The results are very similar to earlier; the observed number of mutual
+ties lies in the extreme right tail of the simulated distribution. This
+suggests a strong deviation from what would be expected under the null
+model of randomly assigned edges with no structural bias toward
+reciprocity. NoteNote
+
+The rgnm() function from the sna (or statnet) package can also be used
+to simulate random networks with a specified expected density. However,
+note again that its output consists of adjacency matrices (as a 3D array
+or list).
+
+# Uniform Graph Distribution Given Dyad Census
+
+CUG tests which preserve the number of mutual, asymmetric and null dyads
+observed in the original network. The test statistic is not reciprocal
+ties, but higher-order patterns such as **transitivity** (triadic
+closure).
+
+Our null hypothesis is now defined as:
+
+$H_0$ : The number of complete triangles (transitive triads) observed in
+the network does not differ from what would be expected under random tie
+allocation, conditional on the observed dyadic processes (i.e., mutual,
+asymmetric, and null dyad frequencies).
+
+Since igraph does not currently provide a function to generate random
+graphs with a fixed dyad census, we make use of rguman() from the sna
+package, and then convert them to graph objects, and use
+igraph::triad_census() to compute the triad-level statistics.
+
+In directed networks, there are two triad types corresponding to closed
+triads, 030T and 300.
+
+``` r
+set.seed(1108)
+sim_nets_man <- rguman(
+  n = 1000, nv = n_nodes,
+  mut = dyad_census(coleman_g)$mut,
+  asym = dyad_census(coleman_g)$asym,
+  null = dyad_census(coleman_g)$null,
+  method = "exact"
+)
+
+sim_g_man <- lapply(
+  1:dim(sim_nets_man)[1],
+  \(i) graph_from_adjacency_matrix(
+      sim_nets_man[i, , ],
+      mode = "directed"
+    )
+)
+```
+
+Get observed triad counts by index
+
+``` r
+obs_triad <- triad_census(coleman_g)
+obs_030T <- obs_triad[9]
+obs_300 <- obs_triad[16]
+
+sim_g_tc_df <- 
+  t(sapply(sim_g_man, triad_census)) %>% 
+  as.data.frame()
+
+triad_df <- sim_g_tc_df %>% 
+  select(9, 16) %>% 
+  rename(`Triad 030T` = 1, `Triad 300` = 2) %>% 
+  pivot_longer(
+    cols = everything(),
+    names_to = "Triad_Type",
+    values_to = "Count"
+  )
+
+obs_df <- data.frame(
+  Triad_Type = c("Triad 030T", "Triad 300"),
+  Count = c(obs_030T, obs_300)
+)
+```
+
+``` r
+ggplot(triad_df, aes(x = Count)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "white") +
+  geom_vline(
+    data = obs_df,
+    aes(xintercept = Count),
+    color = "firebrick3",
+    linetype = "dashed"
+  ) +
+  geom_text(
+    data = obs_df,
+    aes(x = Count, y = Inf, label = "Observed"),
+    angle = 90,
+    vjust = -0.5,
+    hjust = 1.1,
+    color = "firebrick3"
+  ) +
+  facet_wrap(~Triad_Type, scales = "free") +
+  labs(title = " ", x = "Triad Counts", y = "Frequency") +
+  theme_minimal()
+```
+
+<img
+src="15-Non-ParametricMethodsCUG_files/figure-commonmark/CUG-given-MAN-1.png"
+data-fig-align="center" />
+
+# Uniform Graph Distribution Given Fixed Degree
+
+Is the average geodesic distance in the observed network significantly
+shorter (or longer) than would be expected in random networks with the
+same in- and out-degree sequence? To answer this we turn to uniform
+graph distribution given fixed degree. The null world corresponds now to
+the following:
+
+    $H_0$  : The average geodesic distance observed in the network is consistent with what would be expected under random graphs that preserve the in- and out-degree sequence.
+
+This CUG test here evaluates whether the observed network is more (or
+less) efficiently connected than expected under degree-preserving
+randomization.
+
+``` r
+in_deg <- igraph::degree(coleman_g, mode = "in")
+out_deg <- igraph::degree(coleman_g, mode = "out")
+
+obs_dist <- mean_distance(coleman_g, directed = T, unconnected = T)
+```
+
+``` r
+set.seed(1108)
+sim_deg_graphs <- replicate(
+  1000,
+  sample_degseq(
+    out.deg = out_deg,
+    in.deg = in_deg,
+    method = "fast.heur.simple"
+  ),
+  simplify = FALSE
+)
+
+sim_geodist <- sapply(
+  sim_deg_graphs,
+  \(x) mean_distance(x, directed = T, unconnected = T)
+)
+
+geodist_df <- data.frame(avg_geodist = sim_geodist)
+```
+
+``` r
+ggplot(geodist_df, aes(x = avg_geodist)) +
+  geom_histogram(binwidth = 0.05, fill = "skyblue", color = "white") +
+  geom_vline(xintercept = obs_dist, color = "firebrick3", linetype = "dashed") +
+  annotate(
+    "text",
+    x = obs_dist,
+    y = Inf,
+    label = "Observed",
+    angle = 90,
+    vjust = -0.5,
+    hjust = 1.1,
+    color = "firebrick3"
+  ) +
+  labs(title = " ", x = "Average Geodesic Distance", y = "Frequency") +
+  theme_minimal()
+```
+
+![](15-Non-ParametricMethodsCUG_files/figure-commonmark/r4sna-cug-4-1.png)
+
+The network is more efficient than expected under random edge
+arrangement. The empirical p-value is the proportion of simulated mutual
+counts \>= observed.
+
+``` r
+(p_value <- mean(sim_geodist <= obs_dist))
+```
+
+    [1] 0.007
+
+We can reject the null hypothesis.
+
+# Analysing Homophily Using Non-Parametric Null Distribution
+
+To illustrate how we can test for homophily using a non-parametric
+approach, we turn to another data set with available node attributes,
+namely the one by Lazega (2001). This data set comes from a network
+study of corporate law partnership that was carried out in a
+Northeastern US corporate law firm, referred to as SG&R, 1988-1991 in
+New England. It includes (among others) measurements of networks among
+the 71 attorneys (partners and associates) of this firm, i.e., their
+coworker network, advice network, friendship network, and indirect
+control networks. Various members’ attributes are also part of the
+dataset, including seniority, formal status, office in which they work,
+gender, lawschool attended.
+
+Two tests will be performed:
+
+    Test 1: Friendship based on gender
+    Test 2: Cowork among partners based on law practice
+
+``` r
+law_friends_g <- law_friends
+gender <- as.factor(V(law_friends_g)$gender) # 1 = male, 2 = female
+
+# --- Coworking network (only 36 partners) ---
+partners <- 1:36
+law_cowork_partners_g <- induced_subgraph(law_cowork, vids = partners)
+practice <- as.factor(V(law_cowork_partners_g)$pract) # 1 = litigation, 2 = corporate
+
+
+# --- Convert to tidygraph objects and add attributes ---
+tg_friends <- as_tbl_graph(law_friends_g) %>% 
+  mutate(
+    gender = as.factor(gender),
+    network = "Friendship (71 Lawyers)"
+  )
+
+tg_cowork <- as_tbl_graph(law_cowork_partners_g) %>% 
+  mutate(
+    practice = as.factor(practice),
+    network = "Coworking (36 Partners)"
+  )
+```
+
+``` r
+set.seed(1108)
+layout_friends <- create_layout(tg_friends, layout = "fr")
+layout_cowork <- create_layout(tg_cowork, layout = "fr")
+
+# --- Plot 1: Friendship colored by gender ---
+p1 <- ggraph(layout_friends) +
+  geom_edge_link(
+    edge_color = "#666060",
+    end_cap = circle(9, "pt"),
+    n = 2,
+    edge_width = 0.4,
+    edge_alpha = 0.7,
+    arrow = arrow(
+      angle = 15,
+      length = unit(0.1, "inches"),
+      ends = "last",
+      type = "closed"
+    )
+  ) +
+  geom_node_point(aes(color = gender), size = 4) +
+  scale_color_manual(
+    values = c("darkturquoise", "tan2"),
+    labels = c("Male", "Female")
+  ) +
+  labs(title = "Friendship Network", color = "Gender") +
+  theme_graph()
+
+# --- Plot 2: Coworking colored by practice ---
+p2 <- ggraph(layout_cowork) +
+  geom_edge_link(edge_color = "#666060") +
+  geom_node_point(aes(color = practice), size = 4) +
+  scale_color_manual(
+    values = c("forestgreen", "violet"),
+    labels = c("Litigation", "Corporate")
+  ) +
+  labs(title = "Coworking Network (Partners)", color = "Practice") +
+  theme_graph()
+
+# --- Combine plots side by side ---
+p1 / p2
+```
+
+<img
+src="15-Non-ParametricMethodsCUG_files/figure-commonmark/lawyer-plot1-1.png"
+data-fig-align="center" />
+
+## Friendship based on gender
+
+We are here testing the following
+
+> $H_0$: The number of same-gender ties in the network is consistent
+> with a random distribution of ties (given network size and density).
+
+> $H_1$: The observed network has significantly more (or fewer)
+> same-gender ties than expected by chance.
+
+To answer this, we use a non-parametric test based on randomly generated
+networks that match the observed network in size and density. This is
+effectively a CUG test under the null model $\mathcal{U} \mid L$, where
+ties are randomly distributed.
+
+``` r
+law_mat <- law_friends_g %>% 
+  as_adjacency_matrix(sparse = F)
+
+law_nodes <- vcount(law_friends_g)
+law_edges <- sum(law_mat)
+law_gender <- V(law_friends_g)$gender
+```
+
+Then, we compute the number of observed homophilous ties (same-gender
+friendships) in the observed network.
+
+``` r
+homoph_obs <- sum(
+  law_mat[law_gender == 1, law_gender == 1]
+) +
+  sum(
+    law_mat[law_gender == 2, law_gender == 2]
+  )
+```
+
+Simulate 1000 random directed graphs with the same number of nodes and
+edges as the observed network and then compute the number of homophilous
+ties in each simulated network (assuming the same ordering of gender
+assignments to nodes in each simulated network).
+
+``` r
+set.seed(1108)
+law_sim_g <- replicate(
+  1000,
+  {
+    g <- sample_gnm(
+      n = law_nodes, m = law_edges,
+      directed = T, loops = F
+    )
+    as_adjacency_matrix(g, sparse = F)
+  },
+  simplify = F
+)
+
+homoph_sim <- sapply(
+  law_sim_g,
+  \(mat) sum(mat[law_gender == 1, law_gender == 1]) +
+    sum(mat[law_gender == 2, law_gender == 2])
+)
+```
+
+``` r
+homoph_df <- data.frame(homophilous_ties = homoph_sim)
+
+ggplot(homoph_df, aes(x = homophilous_ties)) +
+  geom_histogram(binwidth = 5, fill = "skyblue", color = "white") +
+  geom_vline(
+    xintercept = homoph_obs,
+    color = "firebrick3",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  annotate(
+    "text",
+    x = homoph_obs,
+    y = Inf,
+    label = "Observed",
+    vjust = -0.5,
+    hjust = 1.1,
+    angle = 90,
+    color = "firebrick3"
+  ) +
+  labs(title = " ", x = "Number of Homophilous Ties", y = "Frequency") +
+  theme_minimal()
+```
+
+![](15-Non-ParametricMethodsCUG_files/figure-commonmark/r4sna-cug-5-1.png)
+
+Empirical p-value
+
+``` r
+mean(homoph_sim >= homoph_obs)
+```
+
+    [1] 0
+
+## Cowork among partners based on law practice
+
+Our second test is whether partners in the law firm are more likely to
+collaborate (cowork) with others who share the same practice area
+(litigation or corporate) than we would expect by chance. This is a test
+of homophily based on professional specialization.
+
+We restrict the analysis to the first 36 lawyers, corresponding to the
+partners of the firm (as indicated by their “status” attribute).
+
+The following hypotheses can be stated:
+
+$H_0$ : The number of same-practice coworking ties is consistent with a
+random distribution of ties, given number of ties and edges of the
+network.
+
+$H_1$ : The observed number of same-practice ties is significantly
+greater than expected under random conditions; suggesting homophily
+based on professional specialization.
+
+Since coworking is a reciprocal relationship, we treat the network as
+undirected by symmetrizing the adjacency matrix.
+
+``` r
+law_cw_g <- law_cowork
+law_mat_cwdir <- law_cw_g %>% 
+  as_adjacency_matrix(sparse = F)
+law_mat_cwdir <- law_mat_cwdir[1:36, 1:36]
+```
+
+Symmetrize to create undirected matrix
+
+``` r
+law_mat_cw <- (law_mat_cwdir == 1 & t(law_mat_cwdir) == 1) * 1
+
+law_nodes_cw <- nrow(law_mat_cw)
+law_ties_cw <- sum(law_mat_cw) / 2
+```
+
+Extract binary practice attribute.
+
+``` r
+law_attr_pract <- V(law_cw_g)$practice[1:36]
+```
+
+We define homophilous ties as coworking ties between two lawyers of the
+same practice area. We count both litigation–litigation and
+corporate–corporate ties.
+
+``` r
+homoph_obs_cw <-
+  sum(law_mat_cw[law_attr_pract == 1, law_attr_pract == 1]) / 2 +
+  sum(law_mat_cw[law_attr_pract == 2, law_attr_pract == 2]) / 2
+```
+
+``` r
+set.seed(1108)
+law_sim_cw <- replicate(
+  1000,
+  {
+    sample_gnm(
+      n = law_nodes_cw, m = law_ties_cw,
+      directed = F, loops = F
+    ) %>% 
+      as_adjacency_matrix(sparse = F)
+  },
+  simplify = F
+)
+```
+
+``` r
+homoph_sim_cw <- sapply(
+  law_sim_cw,
+  \(mat) sum(mat[law_attr_pract == 1, law_attr_pract == 1]) / 2 +
+    sum(mat[law_attr_pract == 2, law_attr_pract == 2]) / 2
+)
+```
+
+``` r
+homoph_sim_df <- data.frame(homophilous_ties = homoph_sim_cw)
+
+ggplot(homoph_sim_df, aes(x = homophilous_ties)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "white") +
+  geom_vline(
+    xintercept = homoph_obs_cw,
+    color = "firebrick3",
+    linetype = "dashed"
+  ) +
+  annotate(
+    "text",
+    x = homoph_obs_cw,
+    y = Inf,
+    label = "Observed",
+    vjust = -0.5,
+    hjust = 1.1,
+    angle = 90,
+    color = "firebrick3"
+  ) +
+  labs(title = "", x = "Number of Homophilous Ties", y = "Frequency") +
+  coord_cartesian(ylim = c(0, 100)) +
+  theme_minimal()
+```
+
+![](15-Non-ParametricMethodsCUG_files/figure-commonmark/r4sna-cug-6-1.png)
+
+``` r
+(p_value <- mean(homoph_sim_cw >= homoph_obs_cw))
+```
+
+    [1] 0.001
+
+Thus, there is statistically significant evidence of practice-based
+homophily among the firm’s partners.
