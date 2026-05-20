@@ -103,6 +103,7 @@
               netUtils
               oaqc
               patchwork
+              Rglpk
               RSiena
               relevent
               sf
