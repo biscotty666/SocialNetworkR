@@ -90,6 +90,8 @@
               ggforce
               ggraph
               graphlayouts
+              htmlTable
+              htmltools
               htmlwidgets
               intergraph
               knitr
