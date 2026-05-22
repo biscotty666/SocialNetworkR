@@ -89,6 +89,7 @@
               GA
               ggforce
               ggraph
+              goldfish
               graphlayouts
               htmlTable
               htmltools
