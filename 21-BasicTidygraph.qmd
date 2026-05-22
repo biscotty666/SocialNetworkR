@@ -1,0 +1,198 @@
+---
+title: "Basics of tidygraph"
+format: gfm
+---
+
+[Source](https://schochastics.github.io/R4SNA/tidy/tidygraph-basics.html)
+
+```{r}
+options(paged.print = FALSE)
+```
+
+```{r}
+#| message: false
+
+libraries <- list(
+  "tidygraph", "networkdata", "tidyverse", "ggraph", "zeallot"
+)
+invisible(lapply(libraries, library, character.only = TRUE))
+```
+
+
+# Graph Structures
+
+```{r}
+(flo_tidy <- as_tbl_graph(flo_marriage))
+```
+
+```{r}
+class(flo_tidy)
+```
+
+If you need to build a network from scratch, `tbl_graph()` takes the two data
+frames directly and is essentially the tidy counterpart of
+`graph_from_data_frame()`. For the common random graph generators, the
+`create_*()` family produces deterministic graphs (lattices, stars, rings) and
+`play_*()` produces stochastic ones (Erdős--Rényi, preferential attachment,
+island models).
+
+```{r}
+create_ring(5)
+```
+
+```{r}
+play_gnp(10, 0.3)
+```
+
+```{r}
+play_barabasi_albert(10, 2)
+```
+
+# Standard verbs
+
+Verbs work on the active table (nodes or edges), set with `activate`.
+
+```{r}
+flo_tidy %>% activate(edges)
+```
+
+A useful trick when you need information from the other table is `.N()` and `.E()`: `.N()` returns the node table while edges are active, and `.E()` returns the edge table while nodes are active. 
+
+```{r}
+(flo_medi <- flo_tidy %>% 
+  activate("edges") %>% 
+  mutate(
+    to_medici = (.N()$name[from] == "Medici" |
+                   .N()$name[to] == "Medici")
+  ))
+```
+
+```{r r4sna-tidybase-1}
+ggraph(flo_medi, "stress") +
+  geom_edge_link0(aes(edge_colour = to_medici)) +
+  geom_node_point(shape = 21, size = 10, fill = "grey66") +
+  geom_node_text(aes(label = name)) +
+  theme_graph()
+```
+
+Filtering on nodes also drops every edge that was incident to a removed node; filtering on edges leaves the node set intact.
+
+```{r r4sna-tidybase-2}
+flo_medi %>% 
+  activate("edges") %>% 
+  filter(to_medici) %>% 
+  ggraph("stress", bbox = 10) +
+  geom_edge_link0(edge_color = "black") +
+  geom_node_point(shape = 21, size = 10, fill = "grey66") +
+  geom_node_text(aes(label = name)) +
+  theme_graph()  
+```
+
+# Joins
+
+`graph_join()` merges two `tbl_graph` objects on a shared node key (by default the `name` column). Nodes that appear in both graphs are identified; edges from both graphs are kept. 
+
+```{r}
+flo_business_tidy <- as_tbl_graph(flo_business)
+```
+
+```{r r4sna-tidybase-3}
+c(marriage_rel, business_rel) %<-%
+  map2(list(flo_tidy, flo_business_tidy),
+      list("marriage", "business"),
+      \(x, y) x %>% 
+        activate("edges") %>% 
+        mutate(relation = y))
+
+marriage_rel %>% 
+  graph_join(business_rel, by = "name") %>% 
+  ggraph("stress") +
+  geom_edge_parallel0(aes(edge_color = relation)) +
+  geom_node_point(shape = 21, size = 10, fill = "grey66") +
+  geom_node_text(aes(label = name)) +
+  theme_graph()
+```
+
+When the goal is instead to keep two networks side by side, for example to lay them out together without merging their node sets, `bind_graphs()` returns the disjoint union. 
+
+```{r r4sna-tidybase-4}
+bind_graphs(
+  flo_tidy %>% activate("nodes") %>% mutate(source = "marriage"),
+  flo_business_tidy %>% activate("nodes") %>% mutate(source = "business")
+) %>% 
+  ggraph("kk") +
+  geom_edge_link0() +
+  geom_node_point(aes(fill = source), shape = 21, size = 8) +
+  geom_node_text(aes(label = name), size = 3) +
+  theme_graph()
+```
+
+Two more verbs, bind_nodes() and bind_edges(), append rows to the active table and are the tidygraph analogues of dplyr::bind_rows(). They are useful when new nodes or edges arrive as a plain data frame.
+
+This is the path of least resistance for attaching an external attribute table keyed on the node name.
+
+```{r}
+family_estate <- data.frame(
+  name = c("Medici", "Strozzi", "Peruzzi", "Guadagni"),
+  estate = c(15, 14, 2, 2)
+)
+
+flo_tidy %>% 
+  activate("nodes") %>% 
+  left_join(family_estate, by = "name")
+```
+
+# Special graph verbs
+
+`morph()`: A morph temporarily reshapes a graph into a different representation, for example the connected components, the shortest path between two nodes, the line graph, or the minimum spanning tree, without committing to that change. Verbs chained after morph() run on the morphed representation, and unmorph() returns to the original graph, propagating any attributes that were added inside the morph back onto the original nodes or edges.
+
+As a first example, we attach the size of each connected component to every node. Inside the to_components morph the graph is effectively split into one sub-graph per component, so graph_order() evaluates separately for each.
+
+```{r}
+flo_tidy %>% 
+  activate("nodes") %>% 
+  morph(to_components) %>% 
+  mutate(component_size = graph_order()) %>% 
+  unmorph()
+```
+
+`convert` is used if you don't want to `unmorph`.
+
+```{r}
+medici_id <- which(igraph::V(flo_tidy)$name == "Medici")
+pazzi_id <- which(igraph::V(flo_tidy)$name == "Pazzi")
+
+flo_tidy %>% 
+  convert(to_shortest_path, medici_id, pazzi_id)
+```
+
+A related verb, `crystallise()`, is worth knowing for morphs that naturally
+return multiple graphs, for instance `to_components` again, or
+`to_local_neighborhood` called on several nodes at once. It materialises the
+morph as a tibble with one row per sub-graph, which is convenient when you want
+to iterate.
+
+The catalogue of morphers is large: `to_undirected`, `to_directed`, `to_simple`,
+`to_subgraph`, `to_contracted`, `to_complement`, `to_minimum_spanning_tree`,
+`to_dominator_tree`, `to_linegraph`, `to_subcomponent`, and more. Rather than
+enumerate them all, the recommendation is to browse `?morphers` once so you know
+what is available and reach for it when the shape of your problem calls for a
+transformed graph.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
