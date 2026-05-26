@@ -31,6 +31,18 @@
             igraph
           ];
         };
+        myGoldfish = pkgs.rPackages.buildRPackage {
+          name = "goldfish";
+          src = pkgs.fetchFromGitHub {
+            owner = "stocnet";
+            repo = "goldfish";
+            rev = "a53fa5390fa0cb879eda640441c53c0b06ba7391";
+            sha256 = "gkHMDhRqWCL4slaGjjDsek050N6eFyG0zllWN/SWx7A=";
+          };
+          propagatedBuildInputs = with pkgs.rPackages; [
+            Rcpp changepoint generics ggplot2 rlang tibble cli lifecycle RcppArmadillo
+          ];
+        };
         myBackbone = pkgs.rPackages.buildRPackage {
           name = "backbone";
           src = pkgs.fetchFromGitHub {
@@ -89,13 +101,16 @@
               GA
               ggforce
               ggraph
-              goldfish
+              migraph
+              myGoldfish
+              # goldfish
               graphlayouts
               htmlTable
               htmltools
               htmlwidgets
               intergraph
               knitr
+              manynet
               MASS
               maps
               netrankr
@@ -105,9 +120,12 @@
               networkdata
               netUtils
               oaqc
+              osmextract
               patchwork
               Rglpk
               RSiena
+              r5r
+              rJavaEnv
               relevent
               sf
               shadowtext
